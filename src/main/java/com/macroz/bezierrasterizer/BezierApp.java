@@ -26,6 +26,11 @@ public class BezierApp extends JFrame {
 	private boolean showMesh = true;
 	private boolean showFill = false;
 
+	private float kd = 0.5f;
+	private float ks = 0.5f;
+	private float m = 50.0f;
+	private float lightZ = 200.0f;
+
 	public BezierApp() {
 		super("Bezier Surface Renderer - L-Z");
 		this.mesh = new Mesh();
@@ -120,6 +125,54 @@ public class BezierApp extends JFrame {
 		panel.add(betaSlider);
 		panel.add(Box.createVerticalStrut(20));
 
+		panel.add(new JSeparator());
+		panel.add(new JLabel("Lighting (Phong):"));
+
+		panel.add(new JLabel("Kd (Diffuse):"));
+		JSlider kdSlider = new JSlider(0, 100, (int)(kd * 100));
+		kdSlider.setMajorTickSpacing(20);
+		kdSlider.setPaintTicks(true);
+		kdSlider.setPaintLabels(true);
+		kdSlider.addChangeListener(e -> {
+			kd = kdSlider.getValue() / 100.0f;
+			canvasPanel.repaint();
+		});
+		panel.add(kdSlider);
+
+		panel.add(new JLabel("Ks (Specular):"));
+		JSlider ksSlider = new JSlider(0, 100, (int)(ks * 100));
+		ksSlider.setMajorTickSpacing(20);
+		ksSlider.setPaintTicks(true);
+		ksSlider.setPaintLabels(true);
+		ksSlider.addChangeListener(e -> {
+			ks = ksSlider.getValue() / 100.0f;
+			canvasPanel.repaint();
+		});
+		panel.add(ksSlider);
+
+		panel.add(new JLabel("m (Shininess):"));
+		JSlider mSlider = new JSlider(1, 100, (int)m);
+		mSlider.setMajorTickSpacing(20);
+		mSlider.setPaintTicks(true);
+		mSlider.setPaintLabels(true);
+		mSlider.addChangeListener(e -> {
+			m = (float) mSlider.getValue();
+			canvasPanel.repaint();
+		});
+		panel.add(mSlider);
+
+		panel.add(new JLabel("Light Z:"));
+		JSlider lightZSlider = new JSlider(50, 500, (int)lightZ);
+		lightZSlider.setMajorTickSpacing(100);
+		lightZSlider.setPaintTicks(true);
+		lightZSlider.setPaintLabels(true);
+		lightZSlider.addChangeListener(e -> {
+			lightZ = (float) lightZSlider.getValue();
+			canvasPanel.repaint();
+		});
+		panel.add(lightZSlider);
+		panel.add(new JSeparator());
+
 		panel.add(new JLabel("Display Options:"));
 		JCheckBox chkPolygon = new JCheckBox("Show Bezier Polygon", showPolygon);
 		chkPolygon.addActionListener(e -> {
@@ -158,6 +211,8 @@ public class BezierApp extends JFrame {
 			Graphics2D g2d = (Graphics2D) g;
 
 			if (showFill) {
+				rasterizer.setLightingParams(kd, ks, m, lightZ);
+				rasterizer.setLightPosition(50, 50);
 				rasterizer.clear();
 				rasterizer.render(mesh.getTriangles());
 				g2d.drawImage(rasterizer.getImage(), 0, 0, null);

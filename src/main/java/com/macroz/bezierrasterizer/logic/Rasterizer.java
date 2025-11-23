@@ -2,6 +2,7 @@ package com.macroz.bezierrasterizer.logic;
 
 import com.macroz.bezierrasterizer.model.Triangle;
 import com.macroz.bezierrasterizer.model.Vertex;
+import org.joml.Vector3f;
 
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
@@ -16,8 +17,32 @@ public class Rasterizer {
 	private float[] zBuffer;
 	private BufferedImage image;
 
+	private float kd = 0.5f;
+	private float ks = 0.5f;
+	private float m = 50.0f;
+
+	// For optimization purposes
+	private final Vector3f lightPos = new Vector3f(0, 0, 200);
+	private final Vector3f L = new Vector3f();
+	private final Vector3f V = new Vector3f(0, 0, 1);
+	private final Vector3f N = new Vector3f();
+	private final Vector3f R = new Vector3f();
+	private final Vector3f pixelPos = new Vector3f();
+
 	public Rasterizer(int width, int height) {
 		resize(width, height);
+	}
+
+	public void setLightingParams(float kd, float ks, float m, float lightZ) {
+		this.kd = kd;
+		this.ks = ks;
+		this.m = m;
+		this.lightPos.z = lightZ;
+	}
+
+	public void setLightPosition(float x, float y) {
+		this.lightPos.x = x;
+		this.lightPos.y = y;
 	}
 
 	public void resize(int width, int height) {
@@ -46,14 +71,12 @@ public class Rasterizer {
 	private void fillTriangle(Triangle t) {
 		float[] x = new float[3];
 		float[] y = new float[3];
-		float[] z = new float[3];
 		int[] idx = {0, 1, 2};
 
 		for (int i = 0; i < 3; i++) {
 			Vertex v = t.vertices[i];
 			x[i] = v.transformedPosition.x + width / 2.0f;
 			y[i] = height / 2.0f - v.transformedPosition.y;
-			z[i] = v.transformedPosition.z;
 		}
 
 		if (y[idx[0]] > y[idx[1]]) swap(idx, 0, 1);
@@ -62,20 +85,11 @@ public class Rasterizer {
 
 		int i1 = idx[0], i2 = idx[1], i3 = idx[2];
 
-		// Temporary color based on depth (z) TODO: Delete this and implement proper lighting
-		int val = (int) ((z[i2] + 100) * 1.5f);
-		val = Math.max(0, Math.min(255, val));
-		int color = (255 << 24) | (val << 8) | (Math.min(val + 50, 255));
-
 		// Slopes
 		float invSlopeLong = (x[i3] - x[i1]) / (y[i3] - y[i1]);
-		float zSlopeLong   = (z[i3] - z[i1]) / (y[i3] - y[i1]);
 		float invSlope1    = (x[i2] - x[i1]) / (y[i2] - y[i1]);
-		float zSlope1      = (z[i2] - z[i1]) / (y[i2] - y[i1]);
 		float invSlope2    = (x[i3] - x[i2]) / (y[i3] - y[i2]);
-		float zSlope2      = (z[i3] - z[i2]) / (y[i3] - y[i2]);
 
-		// Integer Y bounds
 		int yStart = (int) Math.ceil(y[i1]);
 		int yMid   = (int) Math.ceil(y[i2]);
 		int yEnd   = (int) Math.ceil(y[i3]);
@@ -84,10 +98,8 @@ public class Rasterizer {
 		if (yMid > yStart) {
 			float dy = yStart - y[i1];
 			float curXA = x[i1] + invSlopeLong * dy;
-			float curZA = z[i1] + zSlopeLong * dy;
 			float curXB = x[i1] + invSlope1 * dy;
-			float curZB = z[i1] + zSlope1 * dy;
-			processScanlines(yStart, yMid, curXA, curZA, curXB, curZB, invSlopeLong, zSlopeLong, invSlope1, zSlope1, color);
+			processScanlines(yStart, yMid, curXA, curXB, invSlopeLong, invSlope1, t, x, y);
 		}
 
 		// Lower Triangle
@@ -95,46 +107,92 @@ public class Rasterizer {
 			float dyLong = yMid - y[i1];
 			float dyShort = yMid - y[i2];
 			float curXA = x[i1] + invSlopeLong * dyLong;
-			float curZA = z[i1] + zSlopeLong * dyLong;
 			float curXB = x[i2] + invSlope2 * dyShort;
-			float curZB = z[i2] + zSlope2 * dyShort;
-			processScanlines(yMid, yEnd, curXA, curZA, curXB, curZB, invSlopeLong, zSlopeLong, invSlope2, zSlope2, color);
+			processScanlines(yMid, yEnd, curXA, curXB, invSlopeLong, invSlope2, t, x, y);
 		}
 	}
 
-	private void processScanlines(int yStart, int yEnd, float xA, float zA, float xB, float zB, float dxA, float dzA, float dxB, float dzB, int color) {
+	private void processScanlines(int yStart, int yEnd, float xA, float xB, float dxA, float dxB,
+								  Triangle t, float[] xArr, float[] yArr) {
 		for (int y = yStart; y < yEnd; y++) {
 			if (y >= 0 && y < height) {
-				drawScanline(y, xA, xB, zA, zB, color);
+				drawScanline(y, xA, xB, t, xArr, yArr);
 			}
-			xA += dxA;zA += dzA;
-			xB += dxB; zB += dzB;
+			xA += dxA;
+			xB += dxB;
 		}
 	}
 
-	private void drawScanline(int y, float x1, float x2, float z1, float z2, int color) {
-		if (x1 > x2) {
-			float tmp = x1; x1 = x2; x2 = tmp;
-			tmp = z1; z1 = z2; z2 = tmp;
+	private void drawScanline(int y, float xStart, float xEnd, Triangle t, float[] xArr, float[] yArr) {
+		if (xStart > xEnd) {
+			float tmp = xStart; xStart = xEnd; xEnd = tmp;
 		}
 
-		int startX = Math.max(0, (int) Math.ceil(x1));
-		int endX = Math.min(width, (int) Math.ceil(x2));
+		int ixStart = Math.max(0, (int) Math.ceil(xStart));
+		int ixEnd = Math.min(width, (int) Math.ceil(xEnd));
 
-		float dist = x2 - x1;
-		float zStep = (dist == 0) ? 0 : (z2 - z1) / dist;
-
-		float currentZ = z1 + (startX - x1) * zStep;
+		float denom = (yArr[1] - yArr[2]) * (xArr[0] - xArr[2]) + (xArr[2] - xArr[1]) * (yArr[0] - yArr[2]);
+		if (Math.abs(denom) < 1e-5) return;
 
 		int rowOffset = y * width;
-		for (int x = startX; x < endX; x++) {
+		Vertex v1 = t.vertices[0];
+		Vertex v2 = t.vertices[1];
+		Vertex v3 = t.vertices[2];
+
+		for (int x = ixStart; x < ixEnd; x++) {
+			float w1 = ((yArr[1] - yArr[2]) * (x - xArr[2]) + (xArr[2] - xArr[1]) * (y - yArr[2])) / denom;
+			float w2 = ((yArr[2] - yArr[0]) * (x - xArr[2]) + (xArr[0] - xArr[2]) * (y - yArr[2])) / denom;
+			float w3 = 1.0f - w1 - w2;
+
+			float zInterp = w1 * v1.transformedPosition.z + w2 * v2.transformedPosition.z + w3 * v3.transformedPosition.z;
+
 			int idx = rowOffset + x;
-			if (currentZ > zBuffer[idx]) {
-				zBuffer[idx] = currentZ;
-				colorBuffer[idx] = color;
+			if (zInterp > zBuffer[idx]) {
+				zBuffer[idx] = zInterp;
+
+				pixelPos.set(v1.transformedPosition).mul(w1)
+					.add(v2.transformedPosition.x * w2, v2.transformedPosition.y * w2, v2.transformedPosition.z * w2)
+					.add(v3.transformedPosition.x * w3, v3.transformedPosition.y * w3, v3.transformedPosition.z * w3);
+
+				N.set(v1.transformedNormal).mul(w1)
+					.add(v2.transformedNormal.x * w2, v2.transformedNormal.y * w2, v2.transformedNormal.z * w2)
+					.add(v3.transformedNormal.x * w3, v3.transformedNormal.y * w3, v3.transformedNormal.z * w3);
+
+				if (N.lengthSquared() > 0) N.normalize();
+
+				if (N.z < 0) N.negate();
+
+				colorBuffer[idx] = calculatePhongColor(N, pixelPos);
 			}
-			currentZ += zStep;
 		}
+	}
+
+	private int calculatePhongColor(Vector3f N, Vector3f pixelPos) {
+		// L = LightPos - pixelPos
+		L.set(lightPos).sub(pixelPos);
+		if (L.lengthSquared() > 0) L.normalize();
+
+		float cosNL = Math.max(0.0f, N.dot(L));
+
+		R.set(N).mul(2.0f * cosNL).sub(L);
+		if (R.lengthSquared() > 0) R.normalize();
+
+		float cosVR = Math.max(0.0f, V.dot(R));
+		float specFactor = (float) Math.pow(cosVR, m);
+
+		// Temporary colors. TODO: Change later
+		float objectR = 0.5f, objectG = 0.5f, objectB = 0.8f;
+		float lightR = 1.0f, lightG = 1.0f, lightB = 1.0f;
+
+		float r = kd * lightR * objectR * cosNL + ks * lightR * objectR * specFactor;
+		float g = kd * lightG * objectG * cosNL + ks * lightG * objectG * specFactor;
+		float b = kd * lightB * objectB * cosNL + ks * lightB * objectB * specFactor;
+
+		int ir = Math.min(255, (int)(r * 255));
+		int ig = Math.min(255, (int)(g * 255));
+		int ib = Math.min(255, (int)(b * 255));
+
+		return (255 << 24) | (ir << 16) | (ig << 8) | ib;
 	}
 
 	private void swap(int[] arr, int i, int j) {
