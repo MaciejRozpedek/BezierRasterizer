@@ -1,16 +1,20 @@
 package com.macroz.bezierrasterizer;
 
 import com.macroz.bezierrasterizer.logic.MeshGenerator;
-import com.macroz.bezierrasterizer.logic.Rasterizer;
 import com.macroz.bezierrasterizer.logic.SceneTransformer;
+import com.macroz.bezierrasterizer.logic.Rasterizer;
 import com.macroz.bezierrasterizer.model.Mesh;
 import com.macroz.bezierrasterizer.model.Triangle;
 import com.macroz.bezierrasterizer.model.Vertex;
 import org.joml.Vector3f;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.geom.Path2D;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
 
 public class BezierApp extends JFrame {
 
@@ -18,17 +22,23 @@ public class BezierApp extends JFrame {
 	private final CanvasPanel canvasPanel;
 	private final Rasterizer rasterizer;
 
+	// Simulation parameters
 	private int precision = 10;
 	private int alpha = 0; // Z rotation
 	private int beta = 0;  // X rotation
 
+	// UI State
 	private boolean showPolygon = true;
 	private boolean showMesh = true;
 	private boolean showFill = false;
+	private boolean useTexture = false;
+	private boolean useNormalMap = false;
+	private Color selectedColor = new Color(100, 100, 255); // Default object color
 
-	private float kd = 0.5f;
-	private float ks = 0.5f;
-	private float m = 50.0f;
+	// Lighting parameters
+	private float kd = 0.6f;
+	private float ks = 0.4f;
+	private float m = 20.0f;
 	private float lightZ = 200.0f;
 
 	public BezierApp() {
@@ -45,6 +55,7 @@ public class BezierApp extends JFrame {
 		setSize(1200, 900);
 		setLayout(new BorderLayout());
 		rasterizer = new Rasterizer(800, 600);
+		rasterizer.setObjectColor(selectedColor);
 
 		canvasPanel = new CanvasPanel();
 		add(canvasPanel, BorderLayout.CENTER);
@@ -78,6 +89,11 @@ public class BezierApp extends JFrame {
 		mesh.setControlPoint(3, 3, 200, 200, 70);
 	}
 
+	private void updateTransform() {
+		SceneTransformer.transform(mesh, alpha, beta);
+		canvasPanel.repaint();
+	}
+
 	private JPanel createControlPanel() {
 		JPanel panel = new JPanel();
 		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -86,6 +102,7 @@ public class BezierApp extends JFrame {
 
 		panel.add(new JLabel("Triangulation Precision:"));
 		JSlider precisionSlider = new JSlider(2, 60, precision);
+		precisionSlider.setMinorTickSpacing(1);
 		precisionSlider.setMajorTickSpacing(10);
 		precisionSlider.setPaintTicks(true);
 		precisionSlider.setPaintLabels(true);
@@ -93,8 +110,7 @@ public class BezierApp extends JFrame {
 			if (!precisionSlider.getValueIsAdjusting()) {
 				precision = precisionSlider.getValue();
 				MeshGenerator.triangulate(mesh, precision);
-				SceneTransformer.transform(mesh, alpha, beta);
-				canvasPanel.repaint();
+				updateTransform();
 			}
 		});
 		panel.add(precisionSlider);
@@ -107,8 +123,7 @@ public class BezierApp extends JFrame {
 		alphaSlider.setPaintLabels(true);
 		alphaSlider.addChangeListener(e -> {
 			alpha = alphaSlider.getValue();
-			SceneTransformer.transform(mesh, alpha, beta);
-			canvasPanel.repaint();
+			updateTransform();
 		});
 		panel.add(alphaSlider);
 
@@ -119,14 +134,14 @@ public class BezierApp extends JFrame {
 		betaSlider.setPaintLabels(true);
 		betaSlider.addChangeListener(e -> {
 			beta = betaSlider.getValue();
-			SceneTransformer.transform(mesh, alpha, beta);
-			canvasPanel.repaint();
+			updateTransform();
 		});
 		panel.add(betaSlider);
 		panel.add(Box.createVerticalStrut(20));
 
 		panel.add(new JSeparator());
 		panel.add(new JLabel("Lighting (Phong):"));
+		panel.add(Box.createVerticalStrut(20));
 
 		panel.add(new JLabel("Kd (Diffuse):"));
 		JSlider kdSlider = new JSlider(0, 100, (int)(kd * 100));
@@ -138,6 +153,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(kdSlider);
+		panel.add(Box.createVerticalStrut(20));
 
 		panel.add(new JLabel("Ks (Specular):"));
 		JSlider ksSlider = new JSlider(0, 100, (int)(ks * 100));
@@ -149,6 +165,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(ksSlider);
+		panel.add(Box.createVerticalStrut(20));
 
 		panel.add(new JLabel("m (Shininess):"));
 		JSlider mSlider = new JSlider(1, 100, (int)m);
@@ -160,6 +177,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(mSlider);
+		panel.add(Box.createVerticalStrut(20));
 
 		panel.add(new JLabel("Light Z:"));
 		JSlider lightZSlider = new JSlider(50, 500, (int)lightZ);
@@ -171,6 +189,48 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(lightZSlider);
+
+		panel.add(Box.createVerticalStrut(20));
+		panel.add(new JSeparator());
+
+		panel.add(new JLabel("Object Material:"));
+		panel.add(Box.createVerticalStrut(10));
+		JButton btnColor = new JButton("Select Color");
+		btnColor.addActionListener(e -> {
+			Color c = JColorChooser.showDialog(this, "Choose Object Color", selectedColor);
+			if (c != null) {
+				selectedColor = c;
+				rasterizer.setObjectColor(c);
+				canvasPanel.repaint();
+			}
+		});
+		panel.add(btnColor);
+
+		JCheckBox chkTexture = new JCheckBox("Use Texture", useTexture);
+		chkTexture.addActionListener(e -> {
+			useTexture = chkTexture.isSelected();
+			rasterizer.setUseTexture(useTexture);
+			canvasPanel.repaint();
+		});
+		panel.add(chkTexture);
+
+		JButton btnLoadTex = new JButton("Load Texture...");
+		btnLoadTex.addActionListener(e -> loadTextureAction());
+		panel.add(btnLoadTex);
+
+		JCheckBox chkNormal = new JCheckBox("Use Normal Map", useNormalMap);
+		chkNormal.addActionListener(e -> {
+			useNormalMap = chkNormal.isSelected();
+			rasterizer.setUseNormalMap(useNormalMap);
+			canvasPanel.repaint();
+		});
+		panel.add(chkNormal);
+
+		JButton btnLoadNorm = new JButton("Load Normal Map...");
+		btnLoadNorm.addActionListener(e -> loadNormalMapAction());
+		panel.add(btnLoadNorm);
+
+		panel.add(Box.createVerticalStrut(10));
 		panel.add(new JSeparator());
 
 		panel.add(new JLabel("Display Options:"));
@@ -198,6 +258,35 @@ public class BezierApp extends JFrame {
 		return panel;
 	}
 
+	private void loadTextureAction() {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setFileFilter(new FileNameExtensionFilter("Images", "jpg", "png", "bmp"));
+		if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+			try {
+				BufferedImage img = ImageIO.read(chooser.getSelectedFile());
+				rasterizer.setTexture(img);
+				canvasPanel.repaint();
+			} catch (IOException ex) {
+				JOptionPane.showMessageDialog(this, "Error loading texture: " + ex.getMessage());
+			}
+		}
+	}
+
+	private void loadNormalMapAction() {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setFileFilter(new FileNameExtensionFilter("Images", "jpg", "png", "bmp"));
+		if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+			try {
+				BufferedImage img = ImageIO.read(chooser.getSelectedFile());
+				rasterizer.setNormalMap(img);
+				canvasPanel.repaint();
+			} catch (IOException ex) {
+				JOptionPane.showMessageDialog(this, "Error loading normal map: " + ex.getMessage());
+			}
+		}
+	}
+
+
 	private class CanvasPanel extends JPanel {
 		@Override
 		protected void paintComponent(Graphics g) {
@@ -212,7 +301,10 @@ public class BezierApp extends JFrame {
 
 			if (showFill) {
 				rasterizer.setLightingParams(kd, ks, m, lightZ);
-				rasterizer.setLightPosition(50, 50);
+				rasterizer.setLightPosition(0, 0); // Placeholder: animation not yet implemented
+				rasterizer.setUseTexture(useTexture);
+				rasterizer.setUseNormalMap(useNormalMap);
+
 				rasterizer.clear();
 				rasterizer.render(mesh.getTriangles());
 				g2d.drawImage(rasterizer.getImage(), 0, 0, null);
@@ -243,10 +335,10 @@ public class BezierApp extends JFrame {
 			g2d.setColor(Color.RED);
 			g2d.drawLine(0, 0, 100, 0); // X
 			g2d.setColor(Color.GREEN);
-			g2d.drawLine(0, 0, 0, 100);
+			g2d.drawLine(0, 0, 0, 100); // Y
 
 			g2d.setColor(Color.BLUE);
-			g2d.fillOval(-2, -2, 4, 4);
+			g2d.fillOval(-2, -2, 4, 4); // Z
 		}
 
 		private void drawControlPolygon(Graphics2D g2d) {
@@ -267,7 +359,7 @@ public class BezierApp extends JFrame {
 
 			for (int j = 0; j < 4; j++) {
 				Path2D path = new Path2D.Float();
-				Vector3f start = cps[j]; // 0*4 + j
+				Vector3f start = cps[j];
 				path.moveTo(start.x, start.y);
 				for (int i = 1; i < 4; i++) {
 					Vector3f p = cps[i * 4 + j];
@@ -303,6 +395,11 @@ public class BezierApp extends JFrame {
 	}
 
 	public static void main(String[] args) {
+		try {
+			UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+		} catch (Exception e) {
+			// ignore
+		}
 		SwingUtilities.invokeLater(BezierApp::new);
 	}
 }
