@@ -1,6 +1,7 @@
 package com.macroz.bezierrasterizer;
 
 import com.macroz.bezierrasterizer.logic.MeshGenerator;
+import com.macroz.bezierrasterizer.logic.Rasterizer;
 import com.macroz.bezierrasterizer.logic.SceneTransformer;
 import com.macroz.bezierrasterizer.model.Mesh;
 import com.macroz.bezierrasterizer.model.Triangle;
@@ -15,6 +16,7 @@ public class BezierApp extends JFrame {
 
 	private final Mesh mesh;
 	private final CanvasPanel canvasPanel;
+	private final Rasterizer rasterizer;
 
 	private int precision = 10;
 	private int alpha = 0; // Z rotation
@@ -37,6 +39,7 @@ public class BezierApp extends JFrame {
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		setSize(1200, 900);
 		setLayout(new BorderLayout());
+		rasterizer = new Rasterizer(800, 600);
 
 		canvasPanel = new CanvasPanel();
 		add(canvasPanel, BorderLayout.CENTER);
@@ -146,11 +149,24 @@ public class BezierApp extends JFrame {
 		@Override
 		protected void paintComponent(Graphics g) {
 			super.paintComponent(g);
-			Graphics2D g2d = (Graphics2D) g;
-			g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-			g2d.setColor(Color.LIGHT_GRAY);
-			g2d.fillRect(0, 0, getWidth(), getHeight());
+			if (getWidth() != rasterizer.getImage().getWidth() ||
+				getHeight() != rasterizer.getImage().getHeight()) {
+				rasterizer.resize(getWidth(), getHeight());
+			}
+
+			Graphics2D g2d = (Graphics2D) g;
+
+			if (showFill) {
+				rasterizer.clear();
+				rasterizer.render(mesh.getTriangles());
+				g2d.drawImage(rasterizer.getImage(), 0, 0, null);
+			} else {
+				g2d.setColor(Color.LIGHT_GRAY);
+				g2d.fillRect(0, 0, getWidth(), getHeight());
+			}
+
+			g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
 			// Coordinate System Transformation
 			g2d.translate(getWidth() / 2, getHeight() / 2);
@@ -164,10 +180,6 @@ public class BezierApp extends JFrame {
 
 			if (showMesh) {
 				drawMeshWireframe(g2d);
-			}
-
-			if (showFill) {
-				// Fill triangles
 			}
 		}
 
