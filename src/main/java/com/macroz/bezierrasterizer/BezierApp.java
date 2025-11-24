@@ -14,13 +14,18 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.io.IOException;
+import java.util.Objects;
+import java.util.Scanner;
+import java.util.Locale;
 
 public class BezierApp extends JFrame {
 
 	private final Mesh mesh;
 	private final CanvasPanel canvasPanel;
 	private final Rasterizer rasterizer;
+	private final Timer animationTimer;
 
 	// Simulation parameters
 	private int precision = 10;
@@ -34,6 +39,7 @@ public class BezierApp extends JFrame {
 	private boolean useTexture = false;
 	private boolean useNormalMap = false;
 	private Color selectedColor = new Color(100, 100, 255); // Default object color
+	private Color selectedLightColor = Color.WHITE;
 
 	// Lighting parameters
 	private float kd = 0.6f;
@@ -41,12 +47,16 @@ public class BezierApp extends JFrame {
 	private float m = 20.0f;
 	private float lightZ = 200.0f;
 
+	// Animation state
+	private float animAngle = 0.0f;
+	private boolean isAnimating = false;
+
 	public BezierApp() {
 		super("Bezier Surface Renderer - L-Z");
 		this.mesh = new Mesh();
 
 		initDefaultControlPoints();
-		
+
 		// Initial generation and transformation
 		MeshGenerator.triangulate(mesh, precision);
 		SceneTransformer.transform(mesh, alpha, beta);
@@ -56,37 +66,79 @@ public class BezierApp extends JFrame {
 		setLayout(new BorderLayout());
 		rasterizer = new Rasterizer(800, 600);
 		rasterizer.setObjectColor(selectedColor);
+		rasterizer.setLightColor(selectedLightColor);
+
+		loadDefaultTexture();
 
 		canvasPanel = new CanvasPanel();
 		add(canvasPanel, BorderLayout.CENTER);
 
 		JPanel controlPanel = createControlPanel();
-		add(controlPanel, BorderLayout.EAST);
+		JScrollPane scrollPane = new JScrollPane(controlPanel);
+		add(scrollPane, BorderLayout.EAST);
+
+		// Setup Animation Timer (~ 60 FPS)
+		animationTimer = new Timer(16, e -> updateAnimation());
 
 		setLocationRelativeTo(null);
 		setVisible(true);
 	}
 
+	private void loadDefaultTexture() {
+		try {
+			BufferedImage img = ImageIO.read(Objects.requireNonNull(getClass().getResourceAsStream("/monkey.jpg")));
+			if (img != null) {
+				rasterizer.setTexture(img);
+				useTexture = true;
+				rasterizer.setUseTexture(true);
+			}
+		} catch (Exception e) {
+			System.err.println("Could not load default texture 'monkey.jpg': " + e.getMessage());
+		}
+
+		try {
+			BufferedImage normImg = ImageIO.read(Objects.requireNonNull(getClass().getResourceAsStream("/normal_map.jpg")));
+			if (normImg != null) {
+				rasterizer.setNormalMap(normImg);
+				useNormalMap = true;
+				rasterizer.setUseNormalMap(true);
+			}
+		} catch (Exception e) {
+			System.err.println("Could not load default normal map 'normal_map.jpg': " + e.getMessage());
+		}
+	}
+
+	private void updateAnimation() {
+		animAngle += 0.05f; // Increment angle
+		// Spiral motion logic: Radius oscillates slightly to simulate spiral
+		float radius = 200 + 50 * (float)Math.sin(animAngle * 0.3f);
+		float lx = radius * (float)Math.cos(animAngle);
+		float ly = radius * (float)Math.sin(animAngle);
+
+		rasterizer.setLightPosition(lx, ly);
+		canvasPanel.repaint();
+	}
+
 	private void initDefaultControlPoints() {
-		mesh.setControlPoint(0, 0, -200, -200, 50);
-		mesh.setControlPoint(0, 1, -100, -70, -30);
-		mesh.setControlPoint(0, 2, -300, 80, 10);
-		mesh.setControlPoint(0, 3, -190, 200, 100);
+		mesh.setControlPoint(0, 0, -200, -200, 100);
+		mesh.setControlPoint(0, 1, -200, -67, 100);
+		mesh.setControlPoint(0, 2, -200, 67, -100);
+		mesh.setControlPoint(0, 3, -200, 200, -350);
 
-		mesh.setControlPoint(1, 0, -80, -80, 80);
-		mesh.setControlPoint(1, 1, 40, -20, 150);
-		mesh.setControlPoint(1, 2, -160, 120, 20);
-		mesh.setControlPoint(1, 3, -90, 300, -50);
+		mesh.setControlPoint(1, 0, -67, -200, -250);
+		mesh.setControlPoint(1, 1, -67, -67, -350);
+		mesh.setControlPoint(1, 2, -67, 67, -200);
+		mesh.setControlPoint(1, 3, -67, 200, 150);
 
-		mesh.setControlPoint(2, 0, 70, -300, 10);
-		mesh.setControlPoint(2, 1, 180, -100, 100);
-		mesh.setControlPoint(2, 2, -40, 0, -100);
-		mesh.setControlPoint(2, 3, 110, 100, 0);
+		mesh.setControlPoint(2, 0, 67, -200, -250);
+		mesh.setControlPoint(2, 1, 67, -67, -350);
+		mesh.setControlPoint(2, 2, 67, 67, -200);
+		mesh.setControlPoint(2, 3, 67, 200, 150);
 
-		mesh.setControlPoint(3, 0, 180, -190, -20);
-		mesh.setControlPoint(3, 1, 320, -80, 50);
-		mesh.setControlPoint(3, 2, 80, 60, 30);
-		mesh.setControlPoint(3, 3, 200, 200, 70);
+		mesh.setControlPoint(3, 0, 200, -200, 100);
+		mesh.setControlPoint(3, 1, 200, -67, 100);
+		mesh.setControlPoint(3, 2, 200, 67, -100);
+		mesh.setControlPoint(3, 3, 200, 200, -350);
 	}
 
 	private void updateTransform() {
@@ -97,8 +149,13 @@ public class BezierApp extends JFrame {
 	private JPanel createControlPanel() {
 		JPanel panel = new JPanel();
 		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-		panel.setPreferredSize(new Dimension(300, 0));
 		panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+
+		panel.add(new JLabel("Control Points:"));
+		JButton btnLoadFile = new JButton("Load from File (.txt)");
+		btnLoadFile.addActionListener(e -> loadControlPointsFromFile());
+		panel.add(btnLoadFile);
+		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("Triangulation Precision:"));
 		JSlider precisionSlider = new JSlider(2, 60, precision);
@@ -114,11 +171,11 @@ public class BezierApp extends JFrame {
 			}
 		});
 		panel.add(precisionSlider);
-		panel.add(Box.createVerticalStrut(20));
+		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("Alpha (Z-Axis):"));
 		JSlider alphaSlider = new JSlider(-180, 180, alpha);
-		alphaSlider.setMajorTickSpacing(45);
+		alphaSlider.setMajorTickSpacing(90);
 		alphaSlider.setPaintTicks(true);
 		alphaSlider.setPaintLabels(true);
 		alphaSlider.addChangeListener(e -> {
@@ -129,7 +186,7 @@ public class BezierApp extends JFrame {
 
 		panel.add(new JLabel("Beta (X-Axis):"));
 		JSlider betaSlider = new JSlider(-180, 180, beta);
-		betaSlider.setMajorTickSpacing(45);
+		betaSlider.setMajorTickSpacing(90);
 		betaSlider.setPaintTicks(true);
 		betaSlider.setPaintLabels(true);
 		betaSlider.addChangeListener(e -> {
@@ -137,11 +194,7 @@ public class BezierApp extends JFrame {
 			updateTransform();
 		});
 		panel.add(betaSlider);
-		panel.add(Box.createVerticalStrut(20));
-
-		panel.add(new JSeparator());
-		panel.add(new JLabel("Lighting (Phong):"));
-		panel.add(Box.createVerticalStrut(20));
+		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("Kd (Diffuse):"));
 		JSlider kdSlider = new JSlider(0, 100, (int)(kd * 100));
@@ -153,7 +206,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(kdSlider);
-		panel.add(Box.createVerticalStrut(20));
+		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("Ks (Specular):"));
 		JSlider ksSlider = new JSlider(0, 100, (int)(ks * 100));
@@ -165,7 +218,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(ksSlider);
-		panel.add(Box.createVerticalStrut(20));
+		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("m (Shininess):"));
 		JSlider mSlider = new JSlider(1, 100, (int)m);
@@ -177,7 +230,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(mSlider);
-		panel.add(Box.createVerticalStrut(20));
+		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("Light Z:"));
 		JSlider lightZSlider = new JSlider(50, 500, (int)lightZ);
@@ -190,34 +243,65 @@ public class BezierApp extends JFrame {
 		});
 		panel.add(lightZSlider);
 
-		panel.add(Box.createVerticalStrut(20));
+		panel.add(Box.createVerticalStrut(10));
 		panel.add(new JSeparator());
 
-		panel.add(new JLabel("Object Material:"));
-		panel.add(Box.createVerticalStrut(10));
+		JButton btnLightColor = new JButton("Select Light Color");
+		btnLightColor.addActionListener(e -> {
+			Color c = JColorChooser.showDialog(this, "Light Color", selectedLightColor);
+			if (c != null) {
+				selectedLightColor = c;
+				rasterizer.setLightColor(c);
+				canvasPanel.repaint();
+			}
+		});
+		panel.add(btnLightColor);
+
+		JCheckBox chkAnim = new JCheckBox("Animate Light (Spiral)", isAnimating);
+		chkAnim.addActionListener(e -> {
+			isAnimating = chkAnim.isSelected();
+			if (isAnimating) animationTimer.start();
+			else animationTimer.stop();
+		});
+		panel.add(chkAnim);
+		panel.add(new JSeparator());
+
+		panel.add(new JLabel("Object Mode:"));
+		JRadioButton rbSolid = new JRadioButton("Solid Color", !useTexture);
+		JRadioButton rbTexture = new JRadioButton("Texture", useTexture);
+		ButtonGroup bgMode = new ButtonGroup();
+		bgMode.add(rbSolid);
+		bgMode.add(rbTexture);
+
+		rbSolid.addActionListener(e -> {
+			useTexture = false;
+			rasterizer.setUseTexture(false);
+			canvasPanel.repaint();
+		});
+		rbTexture.addActionListener(e -> {
+			useTexture = true;
+			rasterizer.setUseTexture(true);
+			canvasPanel.repaint();
+		});
+
+		panel.add(rbSolid);
 		JButton btnColor = new JButton("Select Color");
 		btnColor.addActionListener(e -> {
 			Color c = JColorChooser.showDialog(this, "Choose Object Color", selectedColor);
 			if (c != null) {
 				selectedColor = c;
 				rasterizer.setObjectColor(c);
-				canvasPanel.repaint();
+				if(rbSolid.isSelected()) canvasPanel.repaint();
 			}
 		});
 		panel.add(btnColor);
 
-		JCheckBox chkTexture = new JCheckBox("Use Texture", useTexture);
-		chkTexture.addActionListener(e -> {
-			useTexture = chkTexture.isSelected();
-			rasterizer.setUseTexture(useTexture);
-			canvasPanel.repaint();
-		});
-		panel.add(chkTexture);
-
+		panel.add(rbTexture);
 		JButton btnLoadTex = new JButton("Load Texture...");
 		btnLoadTex.addActionListener(e -> loadTextureAction());
 		panel.add(btnLoadTex);
 
+		panel.add(Box.createVerticalStrut(5));
 		JCheckBox chkNormal = new JCheckBox("Use Normal Map", useNormalMap);
 		chkNormal.addActionListener(e -> {
 			useNormalMap = chkNormal.isSelected();
@@ -258,6 +342,29 @@ public class BezierApp extends JFrame {
 		return panel;
 	}
 
+	private void loadControlPointsFromFile() {
+		JFileChooser chooser = new JFileChooser();
+		chooser.setFileFilter(new FileNameExtensionFilter("Text Files", "txt"));
+		if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+			File file = chooser.getSelectedFile();
+			try (Scanner scanner = new Scanner(file).useLocale(Locale.US)) {
+				for (int i = 0; i < 16; i++) {
+					if (scanner.hasNextFloat()) {
+						float x = scanner.nextFloat();
+						float y = scanner.nextFloat();
+						float z = scanner.nextFloat();
+						mesh.setControlPoint(i / 4, i % 4, x, y, z);
+					}
+				}
+				MeshGenerator.triangulate(mesh, precision);
+				updateTransform();
+				JOptionPane.showMessageDialog(this, "Points loaded successfully!");
+			} catch (Exception ex) {
+				JOptionPane.showMessageDialog(this, "Error loading file: " + ex.getMessage());
+			}
+		}
+	}
+
 	private void loadTextureAction() {
 		JFileChooser chooser = new JFileChooser();
 		chooser.setFileFilter(new FileNameExtensionFilter("Images", "jpg", "png", "bmp"));
@@ -286,7 +393,6 @@ public class BezierApp extends JFrame {
 		}
 	}
 
-
 	private class CanvasPanel extends JPanel {
 		@Override
 		protected void paintComponent(Graphics g) {
@@ -301,9 +407,6 @@ public class BezierApp extends JFrame {
 
 			if (showFill) {
 				rasterizer.setLightingParams(kd, ks, m, lightZ);
-				rasterizer.setLightPosition(0, 0); // Placeholder: animation not yet implemented
-				rasterizer.setUseTexture(useTexture);
-				rasterizer.setUseNormalMap(useNormalMap);
 
 				rasterizer.clear();
 				rasterizer.render(mesh.getTriangles());
@@ -348,22 +451,18 @@ public class BezierApp extends JFrame {
 
 			for (int i = 0; i < 4; i++) {
 				Path2D path = new Path2D.Float();
-				Vector3f start = cps[i * 4];
-				path.moveTo(start.x, start.y);
+				path.moveTo(cps[i * 4].x, cps[i * 4].y);
 				for (int j = 1; j < 4; j++) {
-					Vector3f p = cps[i * 4 + j];
-					path.lineTo(p.x, p.y);
+					path.lineTo(cps[i * 4 + j].x, cps[i * 4 + j].y);
 				}
 				g2d.draw(path);
 			}
 
 			for (int j = 0; j < 4; j++) {
 				Path2D path = new Path2D.Float();
-				Vector3f start = cps[j];
-				path.moveTo(start.x, start.y);
+				path.moveTo(cps[j].x, cps[j].y);
 				for (int i = 1; i < 4; i++) {
-					Vector3f p = cps[i * 4 + j];
-					path.lineTo(p.x, p.y);
+					path.lineTo(cps[i * 4 + j].x, cps[i * 4 + j].y);
 				}
 				g2d.draw(path);
 			}

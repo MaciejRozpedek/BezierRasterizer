@@ -22,6 +22,7 @@ public class Rasterizer {
 	private float ks = 0.5f;
 	private float m = 50.0f;
 	private int objectColorRGB = 0xFF8080CC;
+	private int lightColorRGB = 0xFFFFFFFF;
 
 	private int[] texturePixels;
 	private int textureW, textureH;
@@ -61,6 +62,10 @@ public class Rasterizer {
 
 	public void setObjectColor(Color color) {
 		this.objectColorRGB = color.getRGB();
+	}
+
+	public void setLightColor(Color color) {
+		this.lightColorRGB = color.getRGB();
 	}
 
 	public void setTexture(BufferedImage img) {
@@ -132,17 +137,14 @@ public class Rasterizer {
 
 		int i1 = idx[0], i2 = idx[1], i3 = idx[2];
 
-		// Slopes
 		float invSlopeLong = (x[i3] - x[i1]) / (y[i3] - y[i1]);
 		float invSlope1    = (x[i2] - x[i1]) / (y[i2] - y[i1]);
 		float invSlope2    = (x[i3] - x[i2]) / (y[i3] - y[i2]);
 
-		// Integer Y bounds
 		int yStart = (int) Math.ceil(y[i1]);
 		int yMid   = (int) Math.ceil(y[i2]);
 		int yEnd   = (int) Math.ceil(y[i3]);
 
-		// Upper Triangle (V1 to V2)
 		if (yMid > yStart) {
 			float dy = yStart - y[i1];
 			float curXA = x[i1] + invSlopeLong * dy;
@@ -150,7 +152,6 @@ public class Rasterizer {
 			processScanlines(yStart, yMid, curXA, curXB, invSlopeLong, invSlope1, t, x, y);
 		}
 
-		// Lower Triangle (V2 to V3)
 		if (yEnd > yMid) {
 			float dyLong = yMid - y[i1];
 			float dyShort = yMid - y[i2];
@@ -189,7 +190,6 @@ public class Rasterizer {
 		Vertex v3 = t.vertices[2];
 
 		for (int x = ixStart; x < ixEnd; x++) {
-			// Barycentric coordinates
 			float w1 = ((yArr[1] - yArr[2]) * (x - xArr[2]) + (xArr[2] - xArr[1]) * (y - yArr[2])) * invDenom;
 			float w2 = ((yArr[2] - yArr[0]) * (x - xArr[2]) + (xArr[0] - xArr[2]) * (y - yArr[2])) * invDenom;
 			float w3 = 1.0f - w1 - w2;
@@ -204,24 +204,20 @@ public class Rasterizer {
 					.add(v2.transformedPosition.x * w2, v2.transformedPosition.y * w2, v2.transformedPosition.z * w2)
 					.add(v3.transformedPosition.x * w3, v3.transformedPosition.y * w3, v3.transformedPosition.z * w3);
 
-				// Interpolate UV coordinates
 				float u = w1 * v1.u + w2 * v2.u + w3 * v3.u;
 				float v = w1 * v1.v + w2 * v2.v + w3 * v3.v;
 
-				// Get Object Color
 				int currentColor = objectColorRGB;
 				if (useTexture && texturePixels != null) {
 					currentColor = sampleTexture(u, v, texturePixels, textureW, textureH);
 				}
 
-				// Interpolate Surface Normal
 				N.set(v1.transformedNormal).mul(w1)
 					.add(v2.transformedNormal.x * w2, v2.transformedNormal.y * w2, v2.transformedNormal.z * w2)
 					.add(v3.transformedNormal.x * w3, v3.transformedNormal.y * w3, v3.transformedNormal.z * w3);
 
 				if (N.lengthSquared() > 0) N.normalize();
 
-				// Normal Mapping (if enabled)
 				if (useNormalMap && normalMapPixels != null) {
 					interpTu.set(v1.transformedTangentU).mul(w1)
 						.add(v2.transformedTangentU.x * w2, v2.transformedTangentU.y * w2, v2.transformedTangentU.z * w2)
@@ -263,8 +259,8 @@ public class Rasterizer {
 
 		int x = (int) (u * (w - 1));
 		int y = (int) (v * (h - 1));
-		 y = (h - 1) - y;
 
+		y = h - 1 - y;
 		return pixels[y * w + x];
 	}
 
@@ -272,6 +268,10 @@ public class Rasterizer {
 		float objectR = ((objColor >> 16) & 0xFF) / 255.0f;
 		float objectG = ((objColor >> 8) & 0xFF) / 255.0f;
 		float objectB = (objColor & 0xFF) / 255.0f;
+
+		float lightR = ((lightColorRGB >> 16) & 0xFF) / 255.0f;
+		float lightG = ((lightColorRGB >> 8) & 0xFF) / 255.0f;
+		float lightB = (lightColorRGB & 0xFF) / 255.0f;
 
 		L.set(lightPos).sub(pixelPos);
 		if (L.lengthSquared() > 0) L.normalize();
@@ -284,9 +284,6 @@ public class Rasterizer {
 		float cosVR = Math.max(0.0f, V.dot(R));
 		float specFactor = (float) Math.pow(cosVR, m);
 
-		float lightR = 1.0f, lightG = 1.0f, lightB = 1.0f; // Assume white light (IL)
-
-		// I = kd * IL * IO * cos(N,L) + ks * IL * IO * cos^m(V,R)
 		float r = kd * lightR * objectR * cosNL + ks * lightR * objectR * specFactor;
 		float g = kd * lightG * objectG * cosNL + ks * lightG * objectG * specFactor;
 		float b = kd * lightB * objectB * cosNL + ks * lightB * objectB * specFactor;
