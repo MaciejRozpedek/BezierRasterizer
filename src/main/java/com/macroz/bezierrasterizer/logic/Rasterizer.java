@@ -7,6 +7,7 @@ import org.joml.Vector3f;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferInt;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -32,8 +33,8 @@ public class Rasterizer {
 	private int normalMapW, normalMapH;
 	private boolean useNormalMap = false;
 
-	// For optimization purposes
-	private final Vector3f lightPos = new Vector3f(0, 0, 200);
+	private final List<Vector3f> lights = new ArrayList<>();
+
 	private final Vector3f L = new Vector3f();
 	private final Vector3f V = new Vector3f(0, 0, 1);
 	private final Vector3f N = new Vector3f();
@@ -44,20 +45,38 @@ public class Rasterizer {
 	private final Vector3f interpTv = new Vector3f();
 	private final Vector3f mapN = new Vector3f();
 
+	private float currentLightZ = 200.0f;
+
 	public Rasterizer(int width, int height) {
 		resize(width, height);
+		lights.add(new Vector3f(0, 0, currentLightZ));
 	}
 
 	public void setLightingParams(float kd, float ks, float m, float lightZ) {
 		this.kd = kd;
 		this.ks = ks;
 		this.m = m;
-		this.lightPos.z = lightZ;
+		this.currentLightZ = lightZ;
+
+		for (Vector3f l : lights) {
+			l.z = lightZ;
+		}
 	}
 
 	public void setLightPosition(float x, float y) {
-		this.lightPos.x = x;
-		this.lightPos.y = y;
+		if (lights.size() != 1) {
+			lights.clear();
+			lights.add(new Vector3f(x, y, currentLightZ));
+		} else {
+			lights.getFirst().set(x, y, currentLightZ);
+		}
+	}
+
+	public void setMultiLights(List<Vector3f> newLights) {
+		lights.clear();
+		for (Vector3f l : newLights) {
+			lights.add(new Vector3f(l.x, l.y, currentLightZ));
+		}
 	}
 
 	public void setObjectColor(Color color) {
@@ -273,24 +292,34 @@ public class Rasterizer {
 		float lightG = ((lightColorRGB >> 8) & 0xFF) / 255.0f;
 		float lightB = (lightColorRGB & 0xFF) / 255.0f;
 
-		L.set(lightPos).sub(pixelPos);
-		if (L.lengthSquared() > 0) L.normalize();
+		float totalR = 0.0f;
+		float totalG = 0.0f;
+		float totalB = 0.0f;
 
-		float cosNL = Math.max(0.0f, N.dot(L));
+		for (Vector3f lightPos : lights) {
+			L.set(lightPos).sub(pixelPos);
+			if (L.lengthSquared() > 0) L.normalize();
 
-		R.set(N).mul(2.0f * cosNL).sub(L);
-		if (R.lengthSquared() > 0) R.normalize();
+			float cosNL = Math.max(0.0f, N.dot(L));
 
-		float cosVR = Math.max(0.0f, V.dot(R));
-		float specFactor = (float) Math.pow(cosVR, m);
+			R.set(N).mul(2.0f * cosNL).sub(L);
+			if (R.lengthSquared() > 0) R.normalize();
 
-		float r = kd * lightR * objectR * cosNL + ks * lightR * objectR * specFactor;
-		float g = kd * lightG * objectG * cosNL + ks * lightG * objectG * specFactor;
-		float b = kd * lightB * objectB * cosNL + ks * lightB * objectB * specFactor;
+			float cosVR = Math.max(0.0f, V.dot(R));
+			float specFactor = (float) Math.pow(cosVR, m);
 
-		int ir = Math.min(255, (int)(r * 255));
-		int ig = Math.min(255, (int)(g * 255));
-		int ib = Math.min(255, (int)(b * 255));
+			float scale = 1.0f;
+			if (lights.size() > 1) {
+				scale = 0.3f;
+			}
+			totalR += (kd * lightR * objectR * cosNL + ks * lightR * objectR * specFactor) * scale;
+			totalG += (kd * lightG * objectG * cosNL + ks * lightG * objectG * specFactor) * scale;
+			totalB += (kd * lightB * objectB * cosNL + ks * lightB * objectB * specFactor) * scale;
+		}
+
+		int ir = Math.min(255, (int) (totalR * 255));
+		int ig = Math.min(255, (int) (totalG * 255));
+		int ib = Math.min(255, (int) (totalB * 255));
 
 		return (255 << 24) | (ir << 16) | (ig << 8) | ib;
 	}

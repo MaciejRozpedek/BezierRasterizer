@@ -10,15 +10,15 @@ import org.joml.Vector3f;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
+import javax.swing.Timer;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
-import java.util.Objects;
-import java.util.Scanner;
-import java.util.Locale;
+import java.util.*;
+import java.util.List;
 
 public class BezierApp extends JFrame {
 
@@ -47,9 +47,14 @@ public class BezierApp extends JFrame {
 	private float m = 20.0f;
 	private float lightZ = 200.0f;
 
+	private enum LightMode {
+		STATIC, ANIMATION, MULTI_16
+	}
+
+	private LightMode currentLightMode = LightMode.STATIC;
+
 	// Animation state
 	private float animAngle = 0.0f;
-	private boolean isAnimatingLight = false;
 
 	// CP Animation state
 	private boolean isAnimatingCP = false;
@@ -73,6 +78,8 @@ public class BezierApp extends JFrame {
 		rasterizer.setObjectColor(selectedColor);
 		rasterizer.setLightColor(selectedLightColor);
 
+		rasterizer.setLightPosition(0, 0);
+
 		loadDefaultTexture();
 		useTexture = false;
 		rasterizer.setUseTexture(useTexture);
@@ -82,6 +89,7 @@ public class BezierApp extends JFrame {
 
 		JPanel controlPanel = createControlPanel();
 		JScrollPane scrollPane = new JScrollPane(controlPanel);
+		scrollPane.setPreferredSize(new Dimension(300, 0));
 		add(scrollPane, BorderLayout.EAST);
 
 		// Setup Animation Timer (~ 60 FPS)
@@ -118,7 +126,7 @@ public class BezierApp extends JFrame {
 	private void updateAnimation() {
 		boolean needsRepaint = false;
 
-		if (isAnimatingLight) {
+		if (currentLightMode == LightMode.ANIMATION) {
 			animAngle += 0.05f;
 			float radius = 200 + 50 * (float) Math.sin(animAngle * 0.3f);
 			float lx = radius * (float) Math.cos(animAngle);
@@ -145,11 +153,39 @@ public class BezierApp extends JFrame {
 	}
 
 	private void checkTimerState() {
-		if (isAnimatingLight || isAnimatingCP) {
+		boolean animateLight = (currentLightMode == LightMode.ANIMATION);
+		if (animateLight || isAnimatingCP) {
 			if (!animationTimer.isRunning()) animationTimer.start();
 		} else {
 			animationTimer.stop();
 		}
+	}
+
+	private void setupLightMode(LightMode mode) {
+		currentLightMode = mode;
+		switch (mode) {
+			case STATIC:
+				rasterizer.setLightPosition(0, 0);
+				canvasPanel.repaint();
+				break;
+			case ANIMATION:
+				// handled in updateAnimation
+				break;
+			case MULTI_16:
+				List<Vector3f> gridLights = new ArrayList<>();
+				// Grid 4x4 from -300 to 300
+				for (int i = 0; i < 4; i++) {
+					for (int j = 0; j < 4; j++) {
+						float x = -300 + i * 200;
+						float y = -300 + j * 200;
+						gridLights.add(new Vector3f(x, y, 0));
+					}
+				}
+				rasterizer.setMultiLights(gridLights);
+				canvasPanel.repaint();
+				break;
+		}
+		checkTimerState();
 	}
 
 	private void initDefaultControlPoints() {
@@ -198,12 +234,12 @@ public class BezierApp extends JFrame {
 		});
 		panel.add(chkAnimCP);
 
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 
 		panel.add(new JLabel("Triangulation Precision:"));
-		JSlider precisionSlider = new JSlider(2, 1000, precision);
+		JSlider precisionSlider = new JSlider(2, 302, precision);
 		precisionSlider.setMinorTickSpacing(1);
-		precisionSlider.setMajorTickSpacing(100);
+		precisionSlider.setMajorTickSpacing(50);
 		precisionSlider.setPaintTicks(true);
 		precisionSlider.setPaintLabels(true);
 		precisionSlider.addChangeListener(e -> {
@@ -214,7 +250,7 @@ public class BezierApp extends JFrame {
 			}
 		});
 		panel.add(precisionSlider);
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 
 		panel.add(new JLabel("Alpha (Z-Axis):"));
 		JSlider alphaSlider = new JSlider(-180, 180, alpha);
@@ -237,7 +273,7 @@ public class BezierApp extends JFrame {
 			updateTransform();
 		});
 		panel.add(betaSlider);
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 
 		panel.add(new JLabel("Kd (Diffuse):"));
 		JSlider kdSlider = new JSlider(0, 100, (int)(kd * 100));
@@ -249,7 +285,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(kdSlider);
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 
 		panel.add(new JLabel("Ks (Specular):"));
 		JSlider ksSlider = new JSlider(0, 100, (int)(ks * 100));
@@ -261,7 +297,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(ksSlider);
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 
 		panel.add(new JLabel("m (Shininess):"));
 		JSlider mSlider = new JSlider(1, 100, (int)m);
@@ -273,7 +309,7 @@ public class BezierApp extends JFrame {
 			canvasPanel.repaint();
 		});
 		panel.add(mSlider);
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 
 		panel.add(new JLabel("Light Z:"));
 		JSlider lightZSlider = new JSlider(50, 500, (int)lightZ);
@@ -282,11 +318,12 @@ public class BezierApp extends JFrame {
 		lightZSlider.setPaintLabels(true);
 		lightZSlider.addChangeListener(e -> {
 			lightZ = (float) lightZSlider.getValue();
+			rasterizer.setLightingParams(kd, ks, m, lightZ);
 			canvasPanel.repaint();
 		});
 		panel.add(lightZSlider);
 
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 		panel.add(new JSeparator());
 
 		JButton btnLightColor = new JButton("Select Light Color");
@@ -300,12 +337,24 @@ public class BezierApp extends JFrame {
 		});
 		panel.add(btnLightColor);
 
-		JCheckBox chkAnimLight = new JCheckBox("Animate Light (Spiral)", isAnimatingLight);
-		chkAnimLight.addActionListener(e -> {
-			isAnimatingLight = chkAnimLight.isSelected();
-			checkTimerState();
-		});
-		panel.add(chkAnimLight);
+		panel.add(new JLabel("Light Mode:"));
+		JRadioButton rbStatic = new JRadioButton("Static (Center)", true);
+		JRadioButton rbAnim = new JRadioButton("Animation (Spiral)", false);
+		JRadioButton rbMulti = new JRadioButton("16 Lights (Grid)", false);
+
+		ButtonGroup bgLight = new ButtonGroup();
+		bgLight.add(rbStatic);
+		bgLight.add(rbAnim);
+		bgLight.add(rbMulti);
+
+		rbStatic.addActionListener(e -> setupLightMode(LightMode.STATIC));
+		rbAnim.addActionListener(e -> setupLightMode(LightMode.ANIMATION));
+		rbMulti.addActionListener(e -> setupLightMode(LightMode.MULTI_16));
+
+		panel.add(rbStatic);
+		panel.add(rbAnim);
+		panel.add(rbMulti);
+
 		panel.add(new JSeparator());
 
 		panel.add(new JLabel("Object Mode:"));
@@ -356,7 +405,7 @@ public class BezierApp extends JFrame {
 		btnLoadNorm.addActionListener(e -> loadNormalMapAction());
 		panel.add(btnLoadNorm);
 
-		panel.add(Box.createVerticalStrut(10));
+		panel.add(Box.createVerticalStrut(5));
 		panel.add(new JSeparator());
 
 		panel.add(new JLabel("Display Options:"));
