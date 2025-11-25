@@ -49,7 +49,12 @@ public class BezierApp extends JFrame {
 
 	// Animation state
 	private float animAngle = 0.0f;
-	private boolean isAnimating = false;
+	private boolean isAnimatingLight = false;
+
+	// CP Animation state
+	private boolean isAnimatingCP = false;
+	private float animCpAngle = 0.0f;
+	private float originalCpZ = 0.0f;
 
 	public BezierApp() {
 		super("Bezier Surface Renderer - L-Z");
@@ -69,6 +74,8 @@ public class BezierApp extends JFrame {
 		rasterizer.setLightColor(selectedLightColor);
 
 		loadDefaultTexture();
+		useTexture = false;
+		rasterizer.setUseTexture(useTexture);
 
 		canvasPanel = new CanvasPanel();
 		add(canvasPanel, BorderLayout.CENTER);
@@ -109,36 +116,64 @@ public class BezierApp extends JFrame {
 	}
 
 	private void updateAnimation() {
-		animAngle += 0.05f; // Increment angle
-		// Spiral motion logic: Radius oscillates slightly to simulate spiral
-		float radius = 200 + 50 * (float)Math.sin(animAngle * 0.3f);
-		float lx = radius * (float)Math.cos(animAngle);
-		float ly = radius * (float)Math.sin(animAngle);
+		boolean needsRepaint = false;
 
-		rasterizer.setLightPosition(lx, ly);
-		canvasPanel.repaint();
+		if (isAnimatingLight) {
+			animAngle += 0.05f;
+			float radius = 200 + 50 * (float) Math.sin(animAngle * 0.3f);
+			float lx = radius * (float) Math.cos(animAngle);
+			float ly = radius * (float) Math.sin(animAngle);
+			rasterizer.setLightPosition(lx, ly);
+			needsRepaint = true;
+		}
+
+		if (isAnimatingCP) {
+			animCpAngle += 0.1f;
+			float newZ = originalCpZ + 200.0f * (float) Math.sin(animCpAngle);
+
+			Vector3f p0 = mesh.getControlPoints()[0];
+			mesh.setControlPoint(0, 0, p0.x, p0.y, newZ);
+
+			MeshGenerator.triangulate(mesh, precision);
+			SceneTransformer.transform(mesh, alpha, beta);
+			needsRepaint = true;
+		}
+
+		if (needsRepaint) {
+			canvasPanel.repaint();
+		}
+	}
+
+	private void checkTimerState() {
+		if (isAnimatingLight || isAnimatingCP) {
+			if (!animationTimer.isRunning()) animationTimer.start();
+		} else {
+			animationTimer.stop();
+		}
 	}
 
 	private void initDefaultControlPoints() {
-		mesh.setControlPoint(0, 0, -200, -200, 100);
-		mesh.setControlPoint(0, 1, -200, -67, 100);
-		mesh.setControlPoint(0, 2, -200, 67, -100);
-		mesh.setControlPoint(0, 3, -200, 200, -350);
+		mesh.setControlPoint(0, 0, -200, -200, 50);
+		mesh.setControlPoint(0, 1, -200, -67, 50);
+		mesh.setControlPoint(0, 2, -200, 67, -50);
+		mesh.setControlPoint(0, 3, -200, 200, -175);
 
-		mesh.setControlPoint(1, 0, -67, -200, -250);
-		mesh.setControlPoint(1, 1, -67, -67, -350);
-		mesh.setControlPoint(1, 2, -67, 67, -200);
-		mesh.setControlPoint(1, 3, -67, 200, 150);
+		mesh.setControlPoint(1, 0, -67, -200, -125);
+		mesh.setControlPoint(1, 1, -67, -67, -175);
+		mesh.setControlPoint(1, 2, -67, 67, -100);
+		mesh.setControlPoint(1, 3, -67, 200, 75);
 
-		mesh.setControlPoint(2, 0, 67, -200, -250);
-		mesh.setControlPoint(2, 1, 67, -67, -350);
-		mesh.setControlPoint(2, 2, 67, 67, -200);
-		mesh.setControlPoint(2, 3, 67, 200, 150);
+		mesh.setControlPoint(2, 0, 67, -200, -125);
+		mesh.setControlPoint(2, 1, 67, -67, -175);
+		mesh.setControlPoint(2, 2, 67, 67, -100);
+		mesh.setControlPoint(2, 3, 67, 200, 75);
 
-		mesh.setControlPoint(3, 0, 200, -200, 100);
-		mesh.setControlPoint(3, 1, 200, -67, 100);
-		mesh.setControlPoint(3, 2, 200, 67, -100);
-		mesh.setControlPoint(3, 3, 200, 200, -350);
+		mesh.setControlPoint(3, 0, 200, -200, 50);
+		mesh.setControlPoint(3, 1, 200, -67, 50);
+		mesh.setControlPoint(3, 2, 200, 67, -50);
+		mesh.setControlPoint(3, 3, 200, 200, -175);
+
+		this.originalCpZ = mesh.getControlPoints()[0].z;
 	}
 
 	private void updateTransform() {
@@ -155,12 +190,20 @@ public class BezierApp extends JFrame {
 		JButton btnLoadFile = new JButton("Load from File (.txt)");
 		btnLoadFile.addActionListener(e -> loadControlPointsFromFile());
 		panel.add(btnLoadFile);
+
+		JCheckBox chkAnimCP = new JCheckBox("Animate Point (0,0) Z-Axis", isAnimatingCP);
+		chkAnimCP.addActionListener(e -> {
+			isAnimatingCP = chkAnimCP.isSelected();
+			checkTimerState();
+		});
+		panel.add(chkAnimCP);
+
 		panel.add(Box.createVerticalStrut(10));
 
 		panel.add(new JLabel("Triangulation Precision:"));
-		JSlider precisionSlider = new JSlider(2, 60, precision);
+		JSlider precisionSlider = new JSlider(2, 1000, precision);
 		precisionSlider.setMinorTickSpacing(1);
-		precisionSlider.setMajorTickSpacing(10);
+		precisionSlider.setMajorTickSpacing(100);
 		precisionSlider.setPaintTicks(true);
 		precisionSlider.setPaintLabels(true);
 		precisionSlider.addChangeListener(e -> {
@@ -257,13 +300,12 @@ public class BezierApp extends JFrame {
 		});
 		panel.add(btnLightColor);
 
-		JCheckBox chkAnim = new JCheckBox("Animate Light (Spiral)", isAnimating);
-		chkAnim.addActionListener(e -> {
-			isAnimating = chkAnim.isSelected();
-			if (isAnimating) animationTimer.start();
-			else animationTimer.stop();
+		JCheckBox chkAnimLight = new JCheckBox("Animate Light (Spiral)", isAnimatingLight);
+		chkAnimLight.addActionListener(e -> {
+			isAnimatingLight = chkAnimLight.isSelected();
+			checkTimerState();
 		});
-		panel.add(chkAnim);
+		panel.add(chkAnimLight);
 		panel.add(new JSeparator());
 
 		panel.add(new JLabel("Object Mode:"));
@@ -356,6 +398,7 @@ public class BezierApp extends JFrame {
 						mesh.setControlPoint(i / 4, i % 4, x, y, z);
 					}
 				}
+				originalCpZ = mesh.getControlPoints()[0].z;
 				MeshGenerator.triangulate(mesh, precision);
 				updateTransform();
 				JOptionPane.showMessageDialog(this, "Points loaded successfully!");
